@@ -6,8 +6,8 @@ zo **Stredoslovenskej energetiky** (portál eZona) a zobrazí ich v **Energy das
 `curl_cffi`, ktorý sa nainštaluje automaticky ako requirement). Žiadny MQTT ani
 externý server netreba.
 
-Vychádza z logiky pôvodného PHP projektu (VT/NT kWh, náklady, preplatok/nedoplatok),
-ale **všetky ceny a sadzby ťahá naživo z API** — nič nie je zadané natvrdo.
+**Všetky ceny a sadzby ťahá naživo z API** — nič nie je zadané natvrdo
+(VT/NT kWh, náklady, preplatok/nedoplatok).
 
 ## Inštalácia cez HACS
 
@@ -56,14 +56,13 @@ vypnutie importu štatistík.
 ## Poznámky
 
 - **Architektúra**: HA OS beží na Alpine/musl; `curl_cffi` má musllinux wheels pre
-  amd64/aarch64. Na netypickej architektúre, kde wheel nie je, použi samostatnú MQTT
-  službu `sse2ha` (v susednom priečinku) ako alternatívu.
+  amd64/aarch64, takže sa nainštaluje automaticky. Na netypickej architektúre, kde
+  wheel nie je k dispozícii, sa integrácia nemusí načítať.
 - **Bezpečnosť**: heslo sa ukladá do config entry HA; v logoch sa nezobrazuje.
-  Heslo, ktoré bolo v pôvodnom `settings.php` v plaintexte, odporúčam zmeniť.
-- **Výpočty**: `kWh = round(Σ kW / 4, 2)`, PHP `round()` (half-away-from-zero)
-  replikované cez `Decimal`. Distribúcia sa kalibruje ako €/kWh z posledného oficiálneho
-  roka (`distribúcia ÷ kWh`); ceny energie sú z API × DPH. Keď API cenu nevráti, cenové
-  entity sú „unavailable" (spotreba beží ďalej) — nič sa nevymýšľa. Pozri `tests/test_tariff.py`.
+- **Výpočty**: `kWh = round(Σ kW / 4, 2)` (zaokrúhľovanie polovice nahor cez `Decimal`).
+  Distribúcia sa kalibruje ako €/kWh z posledného oficiálneho roka (`distribúcia ÷ kWh`);
+  ceny energie sú z API × DPH. Keď API cenu nevráti, cenové entity sú „unavailable"
+  (spotreba beží ďalej) — nič sa nevymýšľa. Pozri `tests/test_tariff.py`.
 
 ## Testovanie
 

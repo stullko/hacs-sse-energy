@@ -4,7 +4,7 @@ Covers the new fully-dynamic flow: log in -> discover delivery points from
 /user/v1/info -> auto-pick (1) or select (many); plus the trimmed options flow.
 The SseClient is mocked, so no network / curl_cffi is touched.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -158,14 +158,18 @@ async def test_options_flow_drops_empty_vt_hours(hass: HomeAssistant):
         data={CONF_USERNAME: "a@b.sk", CONF_PASSWORD: "x", CONF_POINT: "ELECTRICITY_X"},
     )
     entry.add_to_hass(hass)
-    res = await hass.config_entries.options.async_init(entry.entry_id)
-    assert res["type"] == FlowResultType.FORM
-    assert res["step_id"] == "init"
-    res = await hass.config_entries.options.async_configure(
-        res["flow_id"],
-        {CONF_VAT: 1.23, CONF_VT_HOURS: "", CONF_CURRENCY: "EUR",
-         CONF_SCAN_INTERVAL: 21600, CONF_ENABLE_STATISTICS: True},
-    )
+    # OptionsFlowWithReload schedules an entry reload on submit; neutralize it so the
+    # test exercises only the options-flow result (not a full coordinator/network setup).
+    with patch("homeassistant.config_entries.ConfigEntries.async_reload", new=AsyncMock()):
+        res = await hass.config_entries.options.async_init(entry.entry_id)
+        assert res["type"] == FlowResultType.FORM
+        assert res["step_id"] == "init"
+        res = await hass.config_entries.options.async_configure(
+            res["flow_id"],
+            {CONF_VAT: 1.23, CONF_VT_HOURS: "", CONF_CURRENCY: "EUR",
+             CONF_SCAN_INTERVAL: 21600, CONF_ENABLE_STATISTICS: True},
+        )
+        await hass.async_block_till_done()
     assert res["type"] == FlowResultType.CREATE_ENTRY
     assert res["data"][CONF_VAT] == 1.23
     assert CONF_VT_HOURS not in res["data"]  # empty -> coordinator uses tariff preset
@@ -177,10 +181,12 @@ async def test_options_flow_keeps_vt_hours_override(hass: HomeAssistant):
         data={CONF_USERNAME: "a@b.sk", CONF_PASSWORD: "x", CONF_POINT: "ELECTRICITY_X"},
     )
     entry.add_to_hass(hass)
-    res = await hass.config_entries.options.async_init(entry.entry_id)
-    res = await hass.config_entries.options.async_configure(
-        res["flow_id"],
-        {CONF_VAT: 1.23, CONF_VT_HOURS: "0,1,10,15", CONF_CURRENCY: "EUR",
-         CONF_SCAN_INTERVAL: 21600, CONF_ENABLE_STATISTICS: True},
-    )
+    with patch("homeassistant.config_entries.ConfigEntries.async_reload", new=AsyncMock()):
+        res = await hass.config_entries.options.async_init(entry.entry_id)
+        res = await hass.config_entries.options.async_configure(
+            res["flow_id"],
+            {CONF_VAT: 1.23, CONF_VT_HOURS: "0,1,10,15", CONF_CURRENCY: "EUR",
+             CONF_SCAN_INTERVAL: 21600, CONF_ENABLE_STATISTICS: True},
+        )
+        await hass.async_block_till_done()
     assert res["data"][CONF_VT_HOURS] == "0,1,10,15"

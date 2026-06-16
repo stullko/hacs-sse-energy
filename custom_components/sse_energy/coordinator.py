@@ -84,7 +84,9 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
             token_buffer=int(self.opts[CONF_TOKEN_BUFFER]),
         )
         super().__init__(
-            hass, _LOGGER, name=DOMAIN,
+            hass, _LOGGER,
+            config_entry=entry,
+            name=DOMAIN,
             update_interval=timedelta(seconds=int(self.opts[CONF_SCAN_INTERVAL])),
         )
 

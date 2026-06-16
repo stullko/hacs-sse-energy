@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Totals:
-    """Mirror of PHP processConsumptionData()['totals'].
+    """Period totals (kWh + EUR) for one consumption period.
 
     kWh fields are always present; EUR fields are None when the API hasn't provided
     the price / distribution rate (cost is then reported as unavailable)."""

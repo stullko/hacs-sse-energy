@@ -62,7 +62,10 @@ def _series(days: list[dict], tariff: TariffConfig, tz: str):
         except ValueError:
             continue
         for hour, tot, hvt, hnt in hourly_energy(day, tariff):
-            start = datetime(y, m, d, hour, tzinfo=tzinfo)
+            # fold=0 = first (CEST) instance of an ambiguous wall-clock hour on the
+            # autumn DST switch; the rare doubled 02:xx hour then collapses into one
+            # bucket (daily/monthly totals stay correct, only that hour's granularity).
+            start = datetime(y, m, d, hour, tzinfo=tzinfo, fold=0)
             cons.append((start, tot))
             vt.append((start, hvt))
             nt.append((start, hnt))

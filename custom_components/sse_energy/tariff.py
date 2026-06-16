@@ -1,14 +1,13 @@
-"""Tariff & cost math - a faithful port of the PHP `SSE` class numeric logic.
+"""Tariff & cost math.
 
 Pure Python (no Home Assistant imports); shared, unit-tested logic.
 
-Fidelity notes (verified against functions.php / settings.php):
-  * profile-measurement returns 15-min readings; `value` is average power (kW).
-    Energy = raw sum / 4, applied at aggregation points only (roundkwh).
-  * distribucia() converts kWh -> MWh (/1000); *_pevna is a flat EUR/month charge.
-    Tariff constants are already VAT-inclusive (settings.php * $dph).
-  * PHP round() is half-away-from-zero -> replicated via Decimal(ROUND_HALF_UP)
-    using the shortest float repr (PHP runs serialize_precision=-1).
+Notes:
+  * profile-measurement returns 15-min readings; `value` is average power (kW),
+    so energy = raw sum / 4, applied only at aggregation points (roundkwh).
+  * distribucia() applies the calibrated distribution rate (EUR/kWh).
+  * Monetary values use half-away-from-zero rounding via Decimal(ROUND_HALF_UP)
+    on the shortest float repr, so totals match the official invoice.
 """
 from __future__ import annotations
 
@@ -18,15 +17,15 @@ from decimal import ROUND_HALF_UP, Decimal
 from .models import DayTotals, MonthSummary, PeriodResult, Totals
 
 
-def php_round(value: float, ndigits: int = 2) -> float:
-    """Replicate PHP's round($value, 2) (half away from zero)."""
+def round_half_up(value: float, ndigits: int = 2) -> float:
+    """Round to ndigits, half away from zero (matches the invoice rounding)."""
     q = Decimal(1).scaleb(-ndigits)
     return float(Decimal(repr(float(value))).quantize(q, rounding=ROUND_HALF_UP))
 
 
 def roundkwh(power_sum: float) -> float:
-    """Port of SSE::roundkwh(): round(power_sum / 4, 2)."""
-    return php_round(power_sum / 4.0, 2)
+    """15-min average power (kW) summed -> energy: round(power_sum / 4, 2)."""
+    return round_half_up(power_sum / 4.0, 2)
 
 
 @dataclass(frozen=True)
@@ -57,7 +56,7 @@ def distribucia(vt_kwh: float, nt_kwh: float, t: TariffConfig) -> float | None:
     year yet) - there is no hardcoded distribution formula fallback."""
     if t.dist_rate is None:
         return None
-    return php_round(t.dist_rate * (vt_kwh + nt_kwh), 2)
+    return round_half_up(t.dist_rate * (vt_kwh + nt_kwh), 2)
 
 
 def _hour_of(period_from: str) -> int:
@@ -72,7 +71,7 @@ def compute_period(
     period_to: str,
     source: str = "consumption",
 ) -> PeriodResult:
-    """Port of SSE::processConsumptionData()."""
+    """Aggregate a consumption profile into period + per-month VT/NT totals and cost."""
     paid = 0.0
     if payment_obj:
         for adv in (payment_obj.get("advancePayments") or []):
@@ -115,8 +114,8 @@ def compute_period(
     nt_kwh = roundkwh(nt_power_total)
     total_kwh = roundkwh(total_power)
 
-    vt_eur = php_round(vt_kwh * tariff.price_vt, 2) if tariff.price_vt is not None else None
-    nt_eur = php_round(nt_kwh * tariff.price_nt, 2) if tariff.price_nt is not None else None
+    vt_eur = round_half_up(vt_kwh * tariff.price_vt, 2) if tariff.price_vt is not None else None
+    nt_eur = round_half_up(nt_kwh * tariff.price_nt, 2) if tariff.price_nt is not None else None
 
     distribution_total: float | None = None
     if tariff.dist_rate is not None:
@@ -125,11 +124,11 @@ def compute_period(
             month_nt = roundkwh(bucket["nt"])
             month_vt = roundkwh(bucket["vt"])
             distribution_total += distribucia(month_vt, month_nt, tariff)
-        distribution_total = php_round(distribution_total, 2)
+        distribution_total = round_half_up(distribution_total, 2)
 
     if vt_eur is not None and nt_eur is not None and distribution_total is not None:
-        total_eur = php_round(vt_eur + nt_eur + distribution_total, 2)
-        balance = paid - total_eur  # PHP returns raw $paid - $finalTotal
+        total_eur = round_half_up(vt_eur + nt_eur + distribution_total, 2)
+        balance = paid - total_eur  # advances paid minus computed cost
     else:
         total_eur = None
         balance = None
@@ -142,7 +141,7 @@ def compute_period(
         total_kwh=total_kwh,
         total_eur=total_eur,
         distribucia_eur=distribution_total,
-        paid_eur=paid,        # PHP returns raw $paid
+        paid_eur=paid,
         balance_eur=balance,
     )
     return PeriodResult(
@@ -159,11 +158,11 @@ def month_summary(year_months: dict[str, dict[str, float]], ym: str, t: TariffCo
     vt_kwh = roundkwh(bucket["vt"])
     nt_kwh = roundkwh(bucket["nt"])
     total_kwh = roundkwh(bucket["sum"])
-    vt_eur = php_round(vt_kwh * t.price_vt, 2) if t.price_vt is not None else None
-    nt_eur = php_round(nt_kwh * t.price_nt, 2) if t.price_nt is not None else None
+    vt_eur = round_half_up(vt_kwh * t.price_vt, 2) if t.price_vt is not None else None
+    nt_eur = round_half_up(nt_kwh * t.price_nt, 2) if t.price_nt is not None else None
     dist_eur = distribucia(vt_kwh, nt_kwh, t)  # None when no calibrated rate
     if vt_eur is not None and nt_eur is not None and dist_eur is not None:
-        cost_eur = php_round(vt_eur + nt_eur + dist_eur, 2)
+        cost_eur = round_half_up(vt_eur + nt_eur + dist_eur, 2)
     else:
         cost_eur = None
     return MonthSummary(

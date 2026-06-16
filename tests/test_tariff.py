@@ -52,9 +52,9 @@ DAY = {
 CONSUMPTION = {"electricity": {"consumption": [DAY]}}
 
 
-def test_php_round():
-    assert tariff.php_round(2.675, 2) == 2.68
-    assert tariff.php_round(0.125, 2) == 0.13
+def test_round_half_up():
+    assert tariff.round_half_up(2.675, 2) == 2.68
+    assert tariff.round_half_up(0.125, 2) == 0.13
 
 
 def test_roundkwh():

@@ -43,12 +43,41 @@ class SseClient:
         self._buffer = token_buffer
         self.bearer = ""
         self.expires_at = 0
-        self._session = self._new_session()
+        # Session (and the curl_cffi import) is created lazily on first use. All
+        # uses go through hass.async_add_executor_job, so the import never runs on
+        # the event loop -- importing curl_cffi reads its dist-info METADATA from
+        # disk, which HA flags as a blocking call when it happens on the loop.
+        self._session = None
 
     def _new_session(self):
-        from curl_cffi import requests as cffi  # imported lazily (HA installs it)
+        from curl_cffi import requests as cffi  # imported in the executor (HA installs it)
 
         return cffi.Session(impersonate=self._impersonate, timeout=self._timeout)
+
+    def _ensure_session(self):
+        if self._session is None:
+            self._session = self._new_session()
+        return self._session
+
+    def _close_session(self) -> None:
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception:  # noqa: BLE001 - closing must never raise
+                pass
+            self._session = None
+
+    def _reset_session(self):
+        """Close the current session and open a fresh one (retry / re-login).
+
+        Closing first avoids leaking the old curl_cffi handle + socket pool."""
+        self._close_session()
+        self._session = self._new_session()
+        return self._session
+
+    def close(self) -> None:
+        """Release the HTTP session; call from the executor on unload."""
+        self._close_session()
 
     def _headers(self, anonymous: bool = False) -> dict:
         h = {
@@ -68,7 +97,7 @@ class SseClient:
         last: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
-                resp = self._session.request(method, url, json=json_body, headers=self._headers(anonymous))
+                resp = self._ensure_session().request(method, url, json=json_body, headers=self._headers(anonymous))
                 code = resp.status_code
                 if code in (401, 403):
                     raise SseAuthError(f"HTTP {code} for {url}")
@@ -84,12 +113,12 @@ class SseClient:
             except SseError as e:
                 last = e
                 log.warning("request attempt %d/%d failed: %s", attempt, attempts, e)
-                self._session = self._new_session()
+                self._reset_session()
                 time.sleep(1.5 * attempt)
             except Exception as e:  # transport-level
                 last = SseError(f"transport error for {url}: {e}")
                 log.warning("request attempt %d/%d transport error: %s", attempt, attempts, e)
-                self._session = self._new_session()
+                self._reset_session()
                 time.sleep(1.5 * attempt)
         raise last if last else SseError(f"request failed for {url}")
 
@@ -99,7 +128,7 @@ class SseClient:
             raise SseAuthError("credentials missing")
         self.bearer = ""
         self.expires_at = 0
-        self._session = self._new_session()
+        self._reset_session()
 
         start = self._send("POST", f"{self._auth}/login/v1/start", {
             "clientId": "sseWebPortal",

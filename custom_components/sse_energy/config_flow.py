@@ -10,7 +10,12 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    OptionsFlow,
+    OptionsFlowWithReload,
+)
 from homeassistant.core import callback
 
 from . import portal
@@ -120,26 +125,20 @@ class SseEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data={**self._creds, CONF_POINT: point_id})
 
     async def async_step_reauth(self, entry_data: dict[str, Any]):
-        self._reauth_entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
-        )
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
-        entry = self._reauth_entry
+        entry = self._get_reauth_entry()
         if user_input is not None:
-            data = {**entry.data, **user_input}
             try:
-                await _validate_login(self.hass, data)
+                await _validate_login(self.hass, {**entry.data, **user_input})
             except SseAuthError:
                 errors["base"] = "invalid_auth"
             except SseError:
                 errors["base"] = "cannot_connect"
             else:
-                self.hass.config_entries.async_update_entry(entry, data=data)
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
 
         schema = vol.Schema({
             vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME)): str,
@@ -150,14 +149,14 @@ class SseEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        return SseEnergyOptionsFlow(config_entry)
+        return SseEnergyOptionsFlow()
 
 
-class SseEnergyOptionsFlow(OptionsFlow):
-    """Only the values the API doesn't return (VAT, VT/NT hours) + currency/interval."""
+class SseEnergyOptionsFlow(OptionsFlowWithReload):
+    """Only the values the API doesn't return (VAT, VT/NT hours) + currency/interval.
 
-    def __init__(self, entry: ConfigEntry) -> None:
-        self._entry = entry
+    Subclasses OptionsFlowWithReload so HA reloads the entry when options change
+    (replaces the deprecated add_update_listener + async_reload pattern)."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
@@ -168,7 +167,7 @@ class SseEnergyOptionsFlow(OptionsFlow):
             }
             return self.async_create_entry(title="", data=cleaned)
 
-        cur = {**DEFAULTS, **self._entry.data, **self._entry.options}
+        cur = {**DEFAULTS, **self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema({
             vol.Required(CONF_VAT, default=cur[CONF_VAT]): vol.Coerce(float),
             vol.Optional(CONF_VT_HOURS, default=cur.get(CONF_VT_HOURS, "")): str,
