@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SSE Energy",
+        "description": "Credentials for the SSE eZona portal. You'll pick the delivery point next.",
+        "data": {
+          "username": "Email / login",
+          "password": "Password"
+        }
+      },
+      "select_point": {
+        "title": "Select delivery point",
+        "description": "Choose the delivery point you want to track.",
+        "data": {
+          "point": "Delivery point"
+        }
+      },
+      "reauth_confirm": {
+        "title": "SSE Energy - re-authenticate",
+        "data": {
+          "username": "Email / login",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid username or password.",
+      "cannot_connect": "Could not connect to SSE (WAF / network).",
+      "no_points": "No electricity delivery point was found on this account.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This delivery point is already configured.",
+      "reauth_successful": "Re-authentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tariff and period",
+        "description": "Prices are loaded automatically from the API. Here you only set what the API does not return: VAT and VT/NT hours.",
+        "data": {
+          "vat": "VAT multiplier (e.g. 1.23 for 23%)",
+          "vt_hours": "High-tariff (VT) hours (e.g. 0,1,10,15; empty = from tariff)",
+          "currency": "Currency",
+          "scan_interval_seconds": "Update interval (s)",
+          "enable_statistics": "Import hourly statistics (Energy dashboard)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# pytest-homeassistant-custom-component needs asyncio auto mode; pythonpath lets the
+# HA tests import the integration as `custom_components.sse_energy` from the repo root.
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]

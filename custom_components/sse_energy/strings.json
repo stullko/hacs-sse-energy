@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SSE Energy",
+        "description": "Prihlasovacie údaje do portálu SSE eZona. Odberné miesto vyberieš v ďalšom kroku.",
+        "data": {
+          "username": "Email / prihlasovacie meno",
+          "password": "Heslo"
+        }
+      },
+      "select_point": {
+        "title": "Výber odberného miesta",
+        "description": "Vyber odberné miesto, ktoré chceš sledovať.",
+        "data": {
+          "point": "Odberné miesto"
+        }
+      },
+      "reauth_confirm": {
+        "title": "SSE Energy - opätovné prihlásenie",
+        "data": {
+          "username": "Email / prihlasovacie meno",
+          "password": "Heslo"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nesprávne meno alebo heslo.",
+      "cannot_connect": "Nepodarilo sa pripojiť k SSE (WAF / sieť).",
+      "no_points": "Na účte sa nenašlo žiadne odberné miesto pre elektrinu.",
+      "unknown": "Neočakávaná chyba."
+    },
+    "abort": {
+      "already_configured": "Toto odberné miesto je už nakonfigurované.",
+      "reauth_successful": "Prihlásenie obnovené."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tarif a obdobie",
+        "description": "Ceny sa načítavajú automaticky z API. Tu nastavíš len to, čo API nevracia: DPH a VT/NT hodiny.",
+        "data": {
+          "vat": "DPH (násobiteľ, napr. 1.23 pre 23 %)",
+          "vt_hours": "VT hodiny (napr. 0,1,10,15; prázdne = podľa tarify)",
+          "currency": "Mena",
+          "scan_interval_seconds": "Interval aktualizácie (s)",
+          "enable_statistics": "Importovať hodinové štatistiky (Energy dashboard)"
+        }
+      }
+    }
+  }
+}

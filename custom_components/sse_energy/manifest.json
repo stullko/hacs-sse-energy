@@ -1,0 +1,12 @@
+{
+  "domain": "sse_energy",
+  "name": "SSE Energy (Stredoslovenska energetika)",
+  "codeowners": ["@stullko"],
+  "config_flow": true,
+  "documentation": "https://github.com/stullko/hacs-sse-energy",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/stullko/hacs-sse-energy/issues",
+  "requirements": ["curl_cffi>=0.7"],
+  "version": "0.2.0"
+}

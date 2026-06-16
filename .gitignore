@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+
+# read-only probe output - contains personal account data, never commit
+tools/sse_api_dump.json
+tools/sse_explore_dump.json
