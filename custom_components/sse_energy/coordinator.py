@@ -41,6 +41,8 @@ from .tariff import build_tariff, compute_period, month_summary
 _LOGGER = logging.getLogger(__name__)
 
 HISTORY_DAYS = 60  # how far back to pull 15-min profile for month totals + stats backfill
+RECENT_DAYS = 30  # recent window = today - 30 d .. today = 31 days, the SHORT-mode maximum
+STATUS_INCOMPLETE = "neúplné dáta"
 
 
 def merged_options(entry: ConfigEntry) -> dict:
@@ -144,10 +146,13 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
         bill_from, bill_to = portal.current_billing_period(year.period_to if year else None, today)
         if ui.min_date_from and bill_from < ui.min_date_from:
             bill_from = ui.min_date_from
-        # SHORT window returns current-month preConsumption; LONG window returns finalized
-        # consumption up to the end of last month -> merge both for the whole year to date.
-        first = today.replace(day=1)
-        recent_from = (first - timedelta(days=3)).isoformat()
+        # SHORT window (<= 31 days) returns current-month preConsumption; LONG window returns
+        # finalized consumption up to the end of last month -> merge both for the whole year
+        # to date. The recent window is a fixed 31 days: anchoring it to the 1st of the month
+        # made it 32-33 days on the 30th/31st, the portal switched to LONG mode and the current
+        # month vanished. 31 days also covers the previous month while the portal hasn't
+        # finalized it yet (first days of a month).
+        recent_from = (today - timedelta(days=RECENT_DAYS)).isoformat()
         profile_recent = self.client.fetch_profile(recent_from, win_to)   # core; may raise
         profile_year = _safe("year-profile", lambda: self.client.fetch_profile(bill_from, win_to), {})
         merged = list({str(d.get("date")): d
@@ -157,6 +162,28 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
         yest = max(ytd.daily_data, key=lambda x: x.date) if ytd.daily_data else None
         last_data_date = yest.date if yest else None
         stats_days = merged
+
+        # --- plausibility: a LONG-mode or partial reply must not be published as valid
+        # (month = 0, "yesterday" = end of last month) nor imported into statistics ---
+        prev = self.data or {}
+        prev_date = prev.get("last_data_date")
+        month_missing = today.day > 3 and ym not in ytd.year_months
+        problems = []
+        if prev_date and (last_data_date is None or str(last_data_date) < str(prev_date)):
+            problems.append(f"last data day {last_data_date} is older than previous {prev_date}")
+        if month_missing:
+            problems.append(f"current month {ym} missing (got {', '.join(sorted(ytd.year_months)) or 'none'})")
+        incomplete = bool(problems)
+        if incomplete:
+            _LOGGER.warning(
+                "incomplete profile %s .. %s (%d days, last %s): %s; %s, statistics import skipped",
+                recent_from, win_to, len(merged), last_data_date, "; ".join(problems),
+                "keeping previous values" if prev else "month totals unavailable",
+            )
+            stats_days = []
+            if prev:
+                state = {**prev, "last_update": datetime.now(self.tz), "last_fetch_status": STATUS_INCOMPLETE}
+                return {"state": state, "days": stats_days, "tariff": tariff}
 
         # --- finances ---
         balance = portal.parse_balance(_safe("balance", self.client.fetch_balance, {}) or {})
@@ -181,10 +208,10 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
 
         state = {
             # live (current month, estimate from 15-min data + contract prices)
-            "month_consumption": month.total_kwh,
-            "month_vt": month.vt_kwh,
-            "month_nt": month.nt_kwh,
-            "month_cost": month.cost_eur,
+            "month_consumption": None if month_missing else month.total_kwh,
+            "month_vt": None if month_missing else month.vt_kwh,
+            "month_nt": None if month_missing else month.nt_kwh,
+            "month_cost": None if month_missing else month.cost_eur,
             "yesterday_consumption": yest.total if yest else 0.0,
             "yesterday_vt": yest.vt if yest else 0.0,
             "yesterday_nt": yest.nt if yest else 0.0,
@@ -236,7 +263,7 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
             "token_expires_at": datetime.fromtimestamp(exp, self.tz) if exp else None,
             "last_update": now,
             "last_data_date": last_data_date,
-            "last_fetch_status": "ok",
+            "last_fetch_status": STATUS_INCOMPLETE if incomplete else "ok",
             "portal_outage_active": outage.get("active"),
             "portal_outage_message": outage.get("title"),
         }
