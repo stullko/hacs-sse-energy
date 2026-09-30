@@ -4,13 +4,16 @@ External statistics (statistic_id contains ':') carry historical timestamps, so
 the Energy dashboard shows correct hourly/daily bars despite SSE's 1-2 day delay.
 This is the same pattern utility integrations like `opower` use.
 
-Forward-only: only hours strictly after the recorded last `sum` are added, so the
-cumulative sum stays monotonic. Re-running is safe (recorder upserts by id+start).
+Revising: every run rewrites the last REVISE_DAYS days (plus any gap after the last
+stored hour) from the sum stored just before that window. SSE first publishes
+preliminary data and finalizes it later; a forward-only import would keep the
+preliminary (or partial) values forever. Rewriting is safe - the recorder upserts
+by id+start and the sum stays continuous because it is rebuilt from the base.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
@@ -18,13 +21,17 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMet
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .tariff import TariffConfig, hourly_energy
+from .series import COST_SERIES, CONSUMPTION_SERIES, HOUR, build_series, cumulate, revision_window
+from .tariff import TariffConfig
 
 _LOGGER = logging.getLogger(__name__)
+
+REVISE_DAYS = 30  # must stay within the coordinator's recent (SHORT-mode) profile window
 
 try:  # mean_type/unit_class are required from HA Core 2026.11 (added 2025.11)
     from homeassistant.components.recorder.models import StatisticMeanType
@@ -36,100 +43,75 @@ except ImportError:  # pragma: no cover - older HA
     _NEW_META = False
 
 
-def _series(days: list[dict], tariff: TariffConfig, tz: str):
-    """Return [(statistic_id, name, unit, unit_class, points[(dt, value)]), ...].
-
-    Consumption series are always produced; the cost series is added only when the
-    live API supplied both energy prices and a calibrated distribution rate (else
-    we'd be inventing a price - we don't)."""
-    tzinfo = ZoneInfo(tz)
-    cons: list[tuple[datetime, float]] = []
-    vt: list[tuple[datetime, float]] = []
-    nt: list[tuple[datetime, float]] = []
-    cost: list[tuple[datetime, float]] = []
-
-    dist = tariff.dist_rate
-    can_cost = (
-        tariff.price_vt is not None and tariff.price_nt is not None and dist is not None
-    )
-    vt_rate = (tariff.price_vt + dist) if can_cost else 0.0
-    nt_rate = (tariff.price_nt + dist) if can_cost else 0.0
-
-    for day in days:
-        date = str(day.get("date"))
-        try:
-            y, m, d = (int(x) for x in date.split("-"))
-        except ValueError:
-            continue
-        for hour, tot, hvt, hnt in hourly_energy(day, tariff):
-            # fold=0 = first (CEST) instance of an ambiguous wall-clock hour on the
-            # autumn DST switch; the rare doubled 02:xx hour then collapses into one
-            # bucket (daily/monthly totals stay correct, only that hour's granularity).
-            start = datetime(y, m, d, hour, tzinfo=tzinfo, fold=0)
-            cons.append((start, tot))
-            vt.append((start, hvt))
-            nt.append((start, hnt))
-            if can_cost:
-                cost.append((start, hvt * vt_rate + hnt * nt_rate))
-
-    cur = tariff.currency
-    series = [
-        (f"{DOMAIN}:grid_consumption", "SSE Grid consumption", "kWh", "energy", cons),
-        (f"{DOMAIN}:grid_consumption_vt", "SSE Grid consumption VT", "kWh", "energy", vt),
-        (f"{DOMAIN}:grid_consumption_nt", "SSE Grid consumption NT", "kWh", "energy", nt),
-    ]
-    if can_cost:
-        series.append((f"{DOMAIN}:grid_cost", "SSE Grid cost", cur, None, cost))
-    return series
+def _to_dt(value) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    return datetime.fromtimestamp(float(value), timezone.utc)
 
 
-def _to_ts(value) -> float:
-    return value.timestamp() if hasattr(value, "timestamp") else float(value)
+def _sum_before(hass: HomeAssistant, stat_id: str, start: datetime) -> float | None:
+    """Stored `sum` of the last hour before `start` (None if there is none within a week)."""
+    rows = statistics_during_period(
+        hass, start - timedelta(days=7), start, {stat_id}, "hour", None, {"sum"}
+    ).get(stat_id)
+    if not rows:
+        return None
+    return float(rows[-1].get("sum") or 0.0)
 
 
 async def async_import_statistics(
     hass: HomeAssistant, tariff: TariffConfig, days: list[dict], tz: str
 ) -> int:
+    series = build_series(days, tariff, tz)
+    today = datetime.now(ZoneInfo(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
+    revise_from = (today - timedelta(days=REVISE_DAYS)).astimezone(timezone.utc)
+    recorder = get_instance(hass)
     imported = 0
-    for stat_id, name, unit, unit_class, points in _series(days, tariff, tz):
-        if not points:
-            continue
-        points.sort(key=lambda p: p[0])
 
-        last = await get_instance(hass).async_add_executor_job(
+    for suffix, points in series.items():
+        stat_id = f"{DOMAIN}:{suffix}"
+        last = await recorder.async_add_executor_job(
             get_last_statistics, hass, 1, stat_id, True, {"sum"}
         )
         last_sum = 0.0
-        last_start: float | None = None
+        last_start: datetime | None = None
         if last and last.get(stat_id):
             row = last[stat_id][0]
             last_sum = float(row.get("sum") or 0.0)
             if row.get("start") is not None:
-                last_start = _to_ts(row["start"])
+                last_start = _to_dt(row["start"])
 
-        running = last_sum
-        new_stats: list[StatisticData] = []
-        for dt, value in points:
-            if last_start is not None and dt.timestamp() <= last_start:
-                continue
-            running += value
-            new_stats.append(StatisticData(start=dt, state=round(running, 3), sum=round(running, 3)))
-        if not new_stats:
+        window = revision_window(points, last_start, revise_from)
+        if window is None:
             continue
+        start, end = window
+        if last_start is None or last_start < start:
+            base = last_sum
+        else:
+            base = await recorder.async_add_executor_job(_sum_before, hass, stat_id, start)
+            if base is None:  # hole before the window: fall back to forward-only
+                start, base = last_start + HOUR, last_sum
+                if start > end:
+                    continue
 
+        rows = cumulate(points, start, end, base)
+        new_stats = [StatisticData(start=dt, state=s, sum=s) for dt, s in rows]
+        is_cost = suffix in COST_SERIES
         metadata: StatisticMetaData = {
             "has_mean": False,
             "has_sum": True,
-            "name": name,
+            "name": COST_SERIES[suffix] if is_cost else CONSUMPTION_SERIES[suffix],
             "source": DOMAIN,
             "statistic_id": stat_id,
-            "unit_of_measurement": unit,
+            "unit_of_measurement": tariff.currency if is_cost else "kWh",
         }
         if _NEW_META:
             metadata["mean_type"] = _MEAN_NONE  # type: ignore[typeddict-unknown-key]
-            metadata["unit_class"] = unit_class  # type: ignore[typeddict-unknown-key]
+            metadata["unit_class"] = None if is_cost else "energy"  # type: ignore[typeddict-unknown-key]
 
         async_add_external_statistics(hass, metadata, new_stats)
         imported += len(new_stats)
-        _LOGGER.debug("imported %d points into %s (sum=%.3f)", len(new_stats), stat_id, running)
+        _LOGGER.debug(
+            "wrote %d hours into %s (%s .. %s, sum=%.3f)", len(new_stats), stat_id, start, end, rows[-1][1]
+        )
     return imported

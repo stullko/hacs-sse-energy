@@ -31,7 +31,8 @@ Zariadenie **„SSE Energy"** s entitami (čítané priamo z portálu eZóna):
 - **Diagnostika**: platnosť tokenu, posledná aktualizácia, posledný deň dát, stav, výpadok portálu
 
 A **dlhodobé štatistiky** pre Energy dashboard (presné hodinové stĺpce, lebo SSE dáta
-meškajú 1–2 dni): `sse_energy:grid_consumption`, `…_vt`, `…_nt`, `sse_energy:grid_cost`.
+meškajú 1–2 dni): `sse_energy:grid_consumption`, `…_vt`, `…_nt`, `sse_energy:grid_cost`,
+`…_cost_vt`, `…_cost_nt`.
 
 > Energetické ceny sa berú zo `delivery-point` API, distribúcia sa **kalibruje** z oficiálnych
 > ročných nákladov (`consumption` API) a oficiálne ročné sumy idú priamo z API. Nič sa
@@ -39,12 +40,21 @@ meškajú 1–2 dni): `sse_energy:grid_consumption`, `…_vt`, `…_nt`, `sse_en
 
 ## Energy dashboard
 
-Settings → **Energy** → *Grid consumption* → **Add consumption** → vyber štatistiku
-**„SSE Grid consumption"** (`sse_energy:grid_consumption`). Náklady: vyber
-**„SSE Grid cost"**, alebo fixnú cenu, alebo cenu z entity `sensor.*_vt_price` / `_nt_price`.
+Settings → **Energy** → *Grid consumption* → **Add consumption**:
+
+- **jeden zdroj**: štatistika **„SSE Grid consumption"** (`sse_energy:grid_consumption`),
+  náklady **„SSE Grid cost"** (`sse_energy:grid_cost`), alebo
+- **VT a NT zvlášť** (dashboard potom ukazuje drahú a lacnú sadzbu oddelene): dva zdroje,
+  **„SSE Grid consumption VT"** s nákladmi **„SSE Grid cost VT"** a **„SSE Grid consumption NT"**
+  s **„SSE Grid cost NT"**. Nepridávaj popri nich aj celkový zdroj — spotreba by sa rátala dvakrát.
+
+Merané spotrebiče (zásuvky, svetlá) patria do **Individual devices**, nie medzi zdroje zo
+siete — SSE ich spotrebu už obsahuje.
 
 > Štatistiky sa napĺňajú automaticky pri každej aktualizácii (predvolene každých 6 h).
-> Prvý import natiahne históriu za posledné dni; ďalšie behy ju dopĺňajú dopredu.
+> Nový rad sa naplní od začiatku zúčtovacieho roka; každý ďalší beh **prepíše posledných
+> 30 dní** (SSE najprv zverejní predbežné dáta a neskôr ich finalizuje) a doplní nové hodiny.
+> Keďže SSE dáta meškajú 1–2 dni, dnešok je v Energy dashboarde zo siete prázdny.
 
 ## Nastavenia (Configure)
 

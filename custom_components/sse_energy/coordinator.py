@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
@@ -57,6 +57,15 @@ def _collect_days(profile: dict) -> list[dict]:
     for day in (electricity.get("consumption") or []):
         by_date[str(day.get("date"))] = day
     return [by_date[d] for d in sorted(by_date)]
+
+
+def _day_start(value, tz: ZoneInfo) -> datetime | None:
+    """Local midnight of an ISO date (or datetime string); None if unparsable."""
+    try:
+        d = date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+    return datetime(d.year, d.month, d.day, tzinfo=tz)
 
 
 def _safe(label: str, fn, default=None):
@@ -215,6 +224,11 @@ class SseEnergyCoordinator(DataUpdateCoordinator[dict]):
             "yesterday_consumption": yest.total if yest else 0.0,
             "yesterday_vt": yest.vt if yest else 0.0,
             "yesterday_nt": yest.nt if yest else 0.0,
+            # period starts -> `last_reset` of the TOTAL energy sensors
+            "month_start": datetime(today.year, today.month, 1, tzinfo=self.tz),
+            "yesterday_start": _day_start(last_data_date, self.tz),
+            "year_start": _day_start(year.period_from, self.tz) if year else None,
+            "ytd_start": _day_start(bill_from, self.tz),
             # official latest completed billing year (from SSE)
             "year_consumption": year.total_kwh if year else None,
             "year_vt": year.vt_kwh if year else None,

@@ -29,6 +29,7 @@ from .coordinator import SseEnergyCoordinator
 class SseSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict], object]
     unit_kind: str | None = None  # kwh | money | money_per_kwh | timestamp | ampere | text
+    reset_key: str | None = None  # state key holding the period start (-> last_reset)
 
 
 def _v(key: str) -> Callable[[dict], object]:
@@ -49,26 +50,26 @@ def _yesno(key: str) -> Callable[[dict], object]:
 # "entity.sensor.*" blocks in strings.json / translations/*.json.
 SENSORS: tuple[SseSensorEntityDescription, ...] = (
     # --- live current-month estimate (15-min data + contract prices) ---
-    SseSensorEntityDescription(key="month_consumption", unit_kind="kwh",
+    SseSensorEntityDescription(key="month_consumption", unit_kind="kwh", reset_key="month_start",
                                suggested_display_precision=2, value_fn=_v("month_consumption")),
-    SseSensorEntityDescription(key="month_vt", unit_kind="kwh", icon="mdi:weather-sunny",
+    SseSensorEntityDescription(key="month_vt", unit_kind="kwh", reset_key="month_start", icon="mdi:weather-sunny",
                                suggested_display_precision=2, value_fn=_v("month_vt")),
-    SseSensorEntityDescription(key="month_nt", unit_kind="kwh", icon="mdi:weather-night",
+    SseSensorEntityDescription(key="month_nt", unit_kind="kwh", reset_key="month_start", icon="mdi:weather-night",
                                suggested_display_precision=2, value_fn=_v("month_nt")),
     SseSensorEntityDescription(key="month_cost", unit_kind="money", icon="mdi:cash",
                                suggested_display_precision=2, value_fn=_v("month_cost")),
-    SseSensorEntityDescription(key="yesterday_consumption", unit_kind="kwh",
+    SseSensorEntityDescription(key="yesterday_consumption", unit_kind="kwh", reset_key="yesterday_start",
                                suggested_display_precision=2, value_fn=_v("yesterday_consumption")),
-    SseSensorEntityDescription(key="yesterday_vt", unit_kind="kwh", icon="mdi:weather-sunny",
+    SseSensorEntityDescription(key="yesterday_vt", unit_kind="kwh", reset_key="yesterday_start", icon="mdi:weather-sunny",
                                suggested_display_precision=2, value_fn=_v("yesterday_vt")),
-    SseSensorEntityDescription(key="yesterday_nt", unit_kind="kwh", icon="mdi:weather-night",
+    SseSensorEntityDescription(key="yesterday_nt", unit_kind="kwh", reset_key="yesterday_start", icon="mdi:weather-night",
                                suggested_display_precision=2, value_fn=_v("yesterday_nt")),
     # --- official latest completed billing year (authoritative, from SSE) ---
-    SseSensorEntityDescription(key="year_consumption", unit_kind="kwh",
+    SseSensorEntityDescription(key="year_consumption", unit_kind="kwh", reset_key="year_start",
                                suggested_display_precision=2, value_fn=_v("year_consumption")),
-    SseSensorEntityDescription(key="year_vt", unit_kind="kwh", icon="mdi:weather-sunny",
+    SseSensorEntityDescription(key="year_vt", unit_kind="kwh", reset_key="year_start", icon="mdi:weather-sunny",
                                suggested_display_precision=2, value_fn=_v("year_vt")),
-    SseSensorEntityDescription(key="year_nt", unit_kind="kwh", icon="mdi:weather-night",
+    SseSensorEntityDescription(key="year_nt", unit_kind="kwh", reset_key="year_start", icon="mdi:weather-night",
                                suggested_display_precision=2, value_fn=_v("year_nt")),
     SseSensorEntityDescription(key="year_energy_cost", unit_kind="money",
                                icon="mdi:cash", suggested_display_precision=2, value_fn=_v("year_energy_cost")),
@@ -83,7 +84,7 @@ SENSORS: tuple[SseSensorEntityDescription, ...] = (
                                icon="mdi:scale-balance", value_fn=_v("year_estimate_status")),
     SseSensorEntityDescription(key="year_estimate_net", unit_kind="money",
                                icon="mdi:scale-balance", suggested_display_precision=2, value_fn=_v("year_estimate_net")),
-    SseSensorEntityDescription(key="year_to_date_consumption", unit_kind="kwh",
+    SseSensorEntityDescription(key="year_to_date_consumption", unit_kind="kwh", reset_key="ytd_start",
                                suggested_display_precision=2, value_fn=_v("year_to_date_consumption")),
     SseSensorEntityDescription(key="year_to_date_cost", unit_kind="money",
                                icon="mdi:cash", suggested_display_precision=2, value_fn=_v("year_to_date_cost")),
@@ -200,3 +201,10 @@ class SseEnergySensor(CoordinatorEntity[SseEnergyCoordinator], SensorEntity):
     @property
     def native_value(self):
         return self.entity_description.value_fn(self.coordinator.data or {})
+
+    @property
+    def last_reset(self):
+        # period totals (month / yesterday / billing year) restart each period; without
+        # last_reset the recorder would turn every drop into a bogus long-term sum
+        key = self.entity_description.reset_key
+        return (self.coordinator.data or {}).get(key) if key else None
